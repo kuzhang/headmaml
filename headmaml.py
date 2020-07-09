@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import os, sys
 
 # self define functions and classes
-from datagenerator import dataGeneratorv1
+from datagenerator import dataGenerator
 from utils import *
 import pdb
 
@@ -18,21 +18,23 @@ print('Python version: ', sys.version)
 print('TensorFlow version: ', tf.__version__)
 
 # Data generation
-root = r'C:\Users\kkdez\Desktop\dataset\rgbhead\sequence1to3'
-folders = [os.path.join(root, person) for person in os.listdir(root)]
-num_class = 3
-num_per_class =5
-input_shape = (112, 112, 3)
+#root = r'C:\Users\kkdez\Desktop\dataset\rgbhead\sequence1to3'
+root = './data/ominlog/'
 
-#paths = random.sample(folders, num_class)
-generator = dataGeneratorv1(paths=folders,
+num_class = 2
+num_per_class =5
+input_shape = (28, 28, 1)
+
+generator = dataGenerator(root=root,
                           num_per_class=num_per_class,
                           n_classes=num_class,
-                          dim = input_shape)
+                          dim = input_shape,
+                          dataset='ominlog')
 #inp = generate_dataset(generator, num_class, num_per_class)
 
 # create model
-model = CNNModelv3(num_class, input_shape)
+#model = CNNModelv1(num_class, input_shape, 'vgg16')
+model = CNNModelv2(num_class, inputshape=input_shape)
 
 # define maml training parameters
 steps = 1
@@ -77,30 +79,39 @@ def train_maml(model, generator, epochs, batch_size=1, log_steps=1000):
             old_weights = model.get_weights()
             print('old weights:{}'.format(model.trainable_variables[-1].numpy()))
 
-            with tf.GradientTape() as test_tape:
-                # Step 5
-                for _ in range(steps):
-                    with tf.GradientTape() as train_tape:
-                        preda = model(inputa)
-                        train_loss = tf.keras.losses.categorical_crossentropy(labela, preda)
-                    print('train loss:{}'.format(train_loss))
-                    gradients = train_tape.gradient(train_loss, model.trainable_variables)
-                    print('train gradient', gradients[-1].numpy())
-                    # Update model
-                    inner_optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
-                # Step 8
+            # Step 5
+            for _ in range(steps):
+                with tf.GradientTape(persistent=True) as train_tape:
+                    preda = model(inputa)
+                    train_loss = tf.keras.losses.categorical_crossentropy(labela, preda)
+                train_gradients = train_tape.gradient(train_loss, model.trainable_variables)
+                # Update model
+                inner_optimizer.apply_gradients(zip(train_gradients, model.trainable_variables))
+                """
+                for j in range(len(model.trainable_variables)):
+                    delta = tf.subtract(model.trainable_variables[j], tf.multiply(0.1, gradients[j])).numpy()
+                    model.trainable_variables[j].assign(delta)
+                """
+                print('train loss:{}'.format(train_loss))
+                print('train gradient', train_gradients[-1].numpy())
+                print('train weights update',model.trainable_variables[-1].numpy())
+
+            # Step 8
+            with tf.GradientTape(persistent=True) as test_tape:
                 predb = model(inputb)
                 test_loss = tf.keras.losses.categorical_crossentropy(labelb, predb)
 
             # Step 10
             #pdb.set_trace()
-            model.set_weights(old_weights)
-            gradients = test_tape.gradient(test_loss, model.trainable_variables)
-            outer_optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-            print('test test gradient', gradients[-1].numpy())
+            #model.set_weights(old_weights)
+            test_gradients = test_tape.gradient(test_loss, model.trainable_variables)
+            outer_optimizer.apply_gradients(zip(test_gradients, model.trainable_variables))
+
+            print('test gradient', test_gradients[-1].numpy())
             print('test weights update', model.trainable_variables[-1].numpy())
             print('test loss:',test_loss.numpy())
 
 train_maml(model, generator, 5)
+pdb.set_trace()
 model.compile(optimizer=outer_optimizer, loss=tf.keras.losses.categorical_crossentropy, metrics=['acc']) # Compile just for evaluation
